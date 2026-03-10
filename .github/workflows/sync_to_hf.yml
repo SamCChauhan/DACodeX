@@ -16,9 +16,4 @@ jobs:
         env:
           HF_TOKEN: ${{ secrets.HF_TOKEN }}
         run: |
-          git config --global user.email "actions@github.com"
-          git config --global user.name "GitHub Actions"
-          # This ensures we are on a branch named 'main'
-          git checkout -b main || git checkout main
-          # This forces the push to the DoralAI space
-          git push --force https://SamCChauhan:$HF_TOKEN@huggingface.co/spaces/DoralAI/DACodeX main
+          git push --force "https://SamCChauhan:${HF_TOKEN}@huggingface.co/spaces/DoralAI/DACodeX" main
