@@ -267,16 +267,31 @@ def main_page():
         ui.separator().classes('my-4')
         
         def download_transcript():
-            if not chat_history: return
+            if not chat_history:
+                ui.notify("No chat history to save.", type="warning")
+                return
+                
             transcript_text = "DACODEX MENTOR SESSION\n" + "="*30 + "\n\n"
             for msg in chat_history:
                 prefix = "STUDENT" if msg["role"] == "user" else "MENTOR"
                 transcript_text += f"{prefix}:\n{msg['raw_text']}\n\n"
             
-            # Create file bytes for download
             filename = f"DACodeX_Transcript_{datetime.datetime.now().strftime('%Y%m%d_%H%M')}.txt"
-            file_bytes = transcript_text.encode('utf-8')
-            ui.download(file_bytes, filename)
+            
+            try:
+                # Reliably save locally by targeting the user's Downloads folder
+                downloads_path = os.path.join(os.path.expanduser('~'), 'Downloads')
+                if not os.path.exists(downloads_path):
+                    downloads_path = os.getcwd() # Fallback
+                
+                full_path = os.path.join(downloads_path, filename)
+                
+                with open(full_path, "w", encoding="utf-8") as f:
+                    f.write(transcript_text)
+                    
+                ui.notify(f"Transcript saved to: {full_path}", type='positive')
+            except Exception as e:
+                ui.notify(f"Failed to save transcript: {str(e)}", color='negative')
             
         ui.button("Download Text File", on_click=download_transcript).classes('w-full mt-2 start-btn text-white')
 
