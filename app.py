@@ -1,25 +1,26 @@
-import gradio as gr
+from nicegui import ui, app, events
 from google import genai
 from google.genai import types
 from PIL import Image
 import datetime
 import os
-import time
+import asyncio
+import io
 
 # --- 1. SETUP & MODULAR PROMPT LIBRARY ---
 API_KEY = os.environ.get('GOOGLE_API_KEY')
 
 try:
     if not API_KEY:
-        print("⚠️ Warning: GOOGLE_API_KEY not found. Check your Space Secrets.")
+        print("⚠️ Warning: GOOGLE_API_KEY not found. Set it in your environment variables.")
+    # Using the async client for non-blocking UI updates in NiceGUI
     client = genai.Client(api_key=API_KEY)
 except Exception as e:
     print(f"❌ Initialization Error: {e}")
 
-# Stable flash model ID
 MODEL_ID = "gemini-2.5-flash"
 
-# --- SYSTEM PROMPT FRAGMENTS ---
+# --- SYSTEM PROMPT FRAGMENTS (PRESERVED) ---
 BASE_PERSONA = """
 ROLE: You are 'Code Mentor,' a Coding Trainer Chatbot intended for use in a high-school programming classroom.
 VISION: You are a MULTIMODAL AI. You have vision capabilities. You can seamlessly see, read, and analyze uploaded images, screenshots of code or errors, flowcharts, and architecture diagrams.
@@ -92,220 +93,11 @@ def build_system_prompt(mode, language, course):
     prompt_parts.append(TRANSPARENCY_AND_ASSESSMENT)
     return "\n\n".join(prompt_parts)
 
-# --- 2. LOGIC FUNCTIONS ---
-def chat_logic(message, history, mode, language, course):
-    if not language or not course:
-        yield "⚠️ **Configuration Required:** Please select a **Course Curriculum** and a **Target Language** from the sidebar before we start coding!"
-        return
 
-    current_instruction = build_system_prompt(mode, language, course)
-    gemini_history = []
-    
-    # 1. BUILD HISTORY (Properly passing Images & Text to Memory)
-    for msg in history:
-        role = "user" if msg["role"] == "user" else "model"
-        raw_content = msg["content"]
-        parts_list = []
-        
-        if isinstance(raw_content, list):
-            for item in raw_content:
-                if isinstance(item, dict):
-                    if item.get("type") == "text" and "text" in item:
-                        parts_list.append(types.Part.from_text(text=item["text"]))
-                    elif item.get("type") == "file" and "file" in item:
-                        path = item["file"].get("path")
-                        if path:
-                            ext = path.split('.')[-1].lower()
-                            if ext in ['png', 'jpg', 'jpeg', 'webp', 'gif']:
-                                try:
-                                    img = Image.open(path)
-                                    parts_list.append(types.Part.from_image(img))
-                                except Exception as e:
-                                    print(f"Error loading history image: {e}")
-                            else:
-                                try: # Handle previously uploaded .py, .txt, etc.
-                                    with open(path, "r", encoding="utf-8") as f:
-                                        parts_list.append(types.Part.from_text(text=f"\n\n--- Uploaded File: {os.path.basename(path)} ---\n{f.read()}"))
-                                except:
-                                    pass
-        else:
-            text_content = str(raw_content)
-            if text_content.strip():
-                parts_list.append(types.Part.from_text(text=text_content))
-                
-        if parts_list:
-            gemini_history.append(types.Content(role=role, parts=parts_list))
-
-    try:
-        chat = client.chats.create(
-            model=MODEL_ID,
-            config=types.GenerateContentConfig(
-                system_instruction=current_instruction,
-                temperature=0.7 if mode == "Socratic" else 0.2
-            ),
-            history=gemini_history
-        )
-
-        # 2. CURRENT MESSAGE PAYLOAD
-        user_text = message.get("text", "")
-        user_files = message.get("files", [])
-        
-        payload = []
-        if user_text.strip():
-            payload.append(user_text)
-            
-        for file_item in user_files:
-            path = file_item.get("path") if isinstance(file_item, dict) else file_item
-            ext = path.split('.')[-1].lower()
-            
-            if ext in ['png', 'jpg', 'jpeg', 'webp', 'gif']:
-                try:
-                    img = Image.open(path)
-                    payload.append(img)
-                except Exception as e:
-                    print(f"Error loading image: {e}")
-            else:
-                try:
-                    with open(path, "r", encoding="utf-8") as f:
-                        file_text = f.read()
-                        payload.append(f"\n\n--- Uploaded File: {os.path.basename(path)} ---\n{file_text}")
-                except Exception as ex:
-                    print(f"Could not read file {path}: {ex}")
-
-        if not payload:
-            yield "⚠️ Please provide some text or an image."
-            return
-
-        response_stream = chat.send_message_stream(payload)
-        full_response = ""
-        for chunk in response_stream:
-            if chunk.text:
-                for char in chunk.text:
-                    full_response += char
-                    yield full_response
-                    time.sleep(0.015)
-    except Exception as e:
-        yield f"🤖 Technical Hiccup: {str(e)}"
-
-def save_transcript(history):
-    if not history: return None
-    filename = f"DACodeX_Transcript_{datetime.datetime.now().strftime('%Y%m%d_%H%M')}.txt"
-    transcript_text = "DACODEX MENTOR SESSION\n" + "="*30 + "\n\n"
-    
-    for msg in history:
-        prefix = "STUDENT" if msg["role"] == "user" else "MENTOR"
-        raw_content = msg["content"]
-        
-        if isinstance(raw_content, list):
-            texts = []
-            for item in raw_content:
-                if isinstance(item, dict):
-                    if item.get("type") == "text" and "text" in item:
-                        texts.append(item["text"])
-                    elif item.get("type") == "file" and "file" in item:
-                        path = item["file"].get("path")
-                        if path:
-                            ext = path.split('.')[-1].lower()
-                            if ext in ['png', 'jpg', 'jpeg', 'webp', 'gif']:
-                                texts.append(f"[Uploaded Image: {os.path.basename(path)}]")
-                            else:
-                                texts.append(f"[Uploaded File: {os.path.basename(path)}]")
-            text_content = "\n".join(texts)
-        else:
-            text_content = str(raw_content)
-            
-        transcript_text += f"{prefix}:\n{text_content}\n\n"
-        
-    with open(filename, "w", encoding="utf-8") as f:
-        f.write(transcript_text)
-    return filename
-
-def archive_and_clear(history, current_storage):
-    if not history: return current_storage, [], gr.update(choices=[item[0] for item in current_storage])
-    timestamp = datetime.datetime.now().strftime("%H:%M:%S")
-    label = f"Session {timestamp} ({len(history)} messages)"
-    new_storage = [(label, history)] + current_storage
-    new_choices = [item[0] for item in new_storage]
-    return new_storage, [], gr.update(choices=new_choices, value=None)
-
-def load_from_history(selected_label, current_storage):
-    if not selected_label: return gr.update()
-    for label, history in current_storage:
-        if label == selected_label: return history
-    return []
-
-def toggle_sidebar_func(is_visible):
-    new_state = not is_visible
-    button_text = "◀ Hide Sidebar" if new_state else "▶ Show Sidebar"
-    return new_state, gr.update(visible=new_state), gr.update(value=button_text)
-
-# --- 3. THEME & ADVANCED CSS ---
-dacodex_theme = gr.themes.Base(
-    primary_hue=gr.themes.colors.red,
-    neutral_hue=gr.themes.colors.slate,
-    font=[gr.themes.GoogleFont("JetBrains Mono"), "ui-monospace", "monospace"],
-).set(
-    body_background_fill="#09090b",
-    block_background_fill="#121217",
-    block_border_color="#27272a",
-    body_text_color="#e4e4e7",
-    button_primary_background_fill="#dc2626",
-    button_primary_background_fill_hover="#ef4444",
-    block_label_text_color="#D1D5DB"
-)
-
-custom_css = """
-@keyframes flicker {
-    0% { opacity: 0.97; }
-    5% { opacity: 0.9; }
-    10% { opacity: 0.97; }
-    100% { opacity: 1; }
-}
-.landing-container {
-    height: 90vh;
-    display: flex;
-    flex-direction: column;
-    justify-content: center;
-    align-items: center;
-    background: radial-gradient(circle at center, #1e1b4b 0%, #09090b 100%);
-    animation: flicker 0.15s infinite;
-    text-align: center;
-}
-.start-btn {
-    border: 1px solid #ef4444 !important;
-    box-shadow: 0 0 15px rgba(220, 38, 38, 0.4);
-    letter-spacing: 2px;
-    font-weight: bold !important;
-    padding: 20px 40px !important;
-    font-size: 1.2em !important;
-    transition: all 0.3s ease !important;
-    margin-top: 20px;
-    cursor: pointer;
-}
-.start-btn:hover {
-    box-shadow: 0 0 30px rgba(239, 68, 68, 0.8);
-    transform: scale(1.05) !important;
-}
-#chatbot-window {
-    border-left: 2px solid #dc2626;
-    background: rgba(18, 18, 23, 0.8);
-}
-.info-popup {
-    background: #1a1a23;
-    border: 1px solid #dc2626;
-    padding: 15px;
-    border-radius: 8px;
-    margin-bottom: 15px;
-    box-shadow: 0 0 10px rgba(220, 38, 38, 0.2);
-}
-.sidebar-btn {
-    margin-top: 10px !important;
-}
-.toggle-btn {
-    width: 150px !important;
-    margin-bottom: 10px !important;
-}
-"""
+# --- STATE MANAGEMENT ---
+chat_history = []  # Stores UI messages
+session_storage = {} # Stores archived sessions
+pending_uploads = [] # Temporary storage for files before sending
 
 def get_logo(width=400, height=100):
     return f"""
@@ -327,99 +119,271 @@ def get_logo(width=400, height=100):
     </div>
     """
 
-# --- 4. BUILD UI ---
-with gr.Blocks() as demo:
-    session_storage = gr.State([])
-    sidebar_state = gr.State(True)
+# --- UI COMPONENTS & LOGIC ---
 
-    # PRE-SCREEN (Landing Page)
-    with gr.Column(visible=True, elem_classes="landing-container") as landing_page:
-        gr.HTML(get_logo(width=600, height=150))
-        gr.Markdown("### // SYSTEM STATUS: ONLINE\n// ACADEMIC CORE: READY")
-        start_button = gr.Button("INITIALIZE INTERFACE", variant="primary", elem_classes="start-btn")
+@ui.page('/')
+def main_page():
+    # --- STYLING ---
+    ui.add_css("""
+        @import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;800&display=swap');
+        body { background-color: #09090b; color: #e4e4e7; font-family: 'JetBrains Mono', monospace; }
+        
+        @keyframes flicker {
+            0% { opacity: 0.97; } 5% { opacity: 0.9; } 10% { opacity: 0.97; } 100% { opacity: 1; }
+        }
+        .landing-container {
+            height: 100vh;
+            background: radial-gradient(circle at center, #1e1b4b 0%, #09090b 100%);
+            animation: flicker 0.15s infinite;
+        }
+        .start-btn {
+            border: 1px solid #ef4444 !important;
+            box-shadow: 0 0 15px rgba(220, 38, 38, 0.4);
+            letter-spacing: 2px;
+            transition: all 0.3s ease !important;
+        }
+        .start-btn:hover {
+            box-shadow: 0 0 30px rgba(239, 68, 68, 0.8);
+            transform: scale(1.05) !important;
+        }
+        
+        /* Message Text Colors - Forced White */
+        .q-message-text { background-color: #121217 !important; border: 1px solid #27272a; }
+        .q-message-text--sent { background-color: #dc2626 !important; border: none; }
+        .q-message-text-content { color: #ffffff !important; }
+        .q-message-name { color: #D1D5DB !important; }
+        
+        .drawer-bg { background-color: #121217 !important; border-right: 1px solid #27272a; }
+    """)
 
-    # MAIN APP (The Chat Interface)
-    with gr.Column(visible=False) as main_app:
-        gr.HTML(get_logo(width=300, height=80))
+    ui.colors(primary='#dc2626', secondary='#121217', accent='#ef4444')
 
-        with gr.Row():
-            with gr.Column(scale=1) as sidebar_col:
-                # Info Popup Section
-                info_btn = gr.Button("ℹ️ > Quick Guide", size="sm", variant="secondary")
+    # --- 1. LANDING PAGE ---
+    with ui.column().classes('w-full items-center justify-center landing-container') as landing_view:
+        ui.html(get_logo(width=600, height=150))
+        ui.markdown("### // SYSTEM STATUS: ONLINE\n// ACADEMIC CORE: READY").classes('text-center')
+        start_btn = ui.button("INITIALIZE INTERFACE").classes('start-btn mt-4 px-8 py-4 text-lg font-bold rounded text-white')
 
-                with gr.Column(visible=False, elem_classes="info-popup") as info_panel:
-                    gr.Markdown("""
-                    **<u>Teaching Protocol:</u>**
-                    * **Socratic:** AI hints and asks questions to guide you.
-                    * **Direct:** AI explains concepts and gives examples immediately.
-                    **<u>Upload Images & Code:</u>**
-                    Use the 📎 icon in the chat bar to upload screenshots of errors, flowcharts, or even raw `.py` files!
-                    **<u>Archive Current Session:</u>**
-                    Saves current chat in 'Previous Chats' and creates a new session.
-                    """)
-                    close_info_btn = gr.Button("Close Guide", size="sm")
+    # --- 2. SIDEBAR ---
+    with ui.left_drawer(value=False).classes('drawer-bg p-4') as drawer:
+        ui.html(get_logo(width=200, height=60)).classes('mb-4')
+        
+        with ui.dialog() as info_dialog, ui.card().classes('bg-[#1a1a23] border border-[#dc2626] text-white'):
+            ui.markdown("""
+            **<u>Teaching Protocol:</u>**
+            * **Socratic:** AI hints and asks questions to guide you.
+            * **Direct:** AI explains concepts and gives examples immediately.
+            **<u>Upload Images & Code:</u>**
+            Use the 📎 icon in the chat bar to upload screenshots of errors, flowcharts, or even raw `.py` files!
+            **<u>Archive Current Session:</u>**
+            Saves current chat in 'Previous Chats' and creates a new session.
+            """)
+            ui.button('Close', on_click=info_dialog.close)
+        
+        ui.button("ℹ️ Quick Guide", on_click=info_dialog.open).props('outline rounded size=sm').classes('w-full mb-4 text-white')
+        ui.separator()
+        
+        mode_select = ui.select(["Socratic", "Direct"], value="Socratic", label="Teaching Protocol").classes('w-full mt-2 text-white')
+        course_select = ui.select(["AP CS A", "AP CSP", "C++ Fundamentals", "Web Development 101", "Intro to Python", "AP Cybersecurity", "Other"], value="Intro to Python", label="Course Curriculum").classes('w-full mt-2 text-white')
+        language_select = ui.select(["Java", "Python", "JavaScript", "C++", "C#", "SQL"], value="Python", label="Target Language").classes('w-full mt-2 text-white')
+        
+        ui.separator().classes('my-4')
+        ui.label("Session Archives").classes('text-lg font-bold text-gray-300')
+        
+        history_dropdown = ui.select([], label="Previous Chats").classes('w-full mt-2 text-white')
+        
+        def archive_session():
+            if not chat_history: return
+            timestamp = datetime.datetime.now().strftime("%H:%M:%S")
+            label = f"Session {timestamp} ({len(chat_history)} msgs)"
+            session_storage[label] = chat_history.copy()
+            history_dropdown.options = list(session_storage.keys())
+            history_dropdown.update()
+            chat_history.clear()
+            render_messages.refresh()
+        
+        ui.button("Archive Current Session", on_click=archive_session).props('outline rounded').classes('w-full mt-2 text-white')
+        
+        def load_session(e):
+            if e.value in session_storage:
+                chat_history.clear()
+                chat_history.extend(session_storage[e.value])
+                render_messages.refresh()
 
-                gr.Markdown("---")
-                mode_selector = gr.Radio(choices=["Socratic", "Direct"], value="Socratic", label="Teaching Protocol")
-                course_selector = gr.Dropdown(choices=["AP CS A", "AP CSP", "C++ Fundamentals", "Web Development 101", "Intro to Python", "AP Cybersecurity", "Other"], value="Intro to Python", label="Course Curriculum")
-                language_selector = gr.Dropdown(choices=["Java", "Python", "JavaScript", "C++", "C#", "SQL"], value="Python", label="Target Language")
+        history_dropdown.on_value_change(load_session)
+        
+        ui.separator().classes('my-4')
+        
+        def download_transcript():
+            if not chat_history: return
+            transcript_text = "DACODEX MENTOR SESSION\n" + "="*30 + "\n\n"
+            for msg in chat_history:
+                prefix = "STUDENT" if msg["role"] == "user" else "MENTOR"
+                transcript_text += f"{prefix}:\n{msg['raw_text']}\n\n"
+            
+            # Create file bytes for download
+            filename = f"DACodeX_Transcript_{datetime.datetime.now().strftime('%Y%m%d_%H%M')}.txt"
+            file_bytes = transcript_text.encode('utf-8')
+            ui.download(file_bytes, filename)
+            
+        ui.button("Download Text File", on_click=download_transcript).classes('w-full mt-2 start-btn text-white')
 
-                gr.Markdown("---")
-                gr.Markdown("### Session Archives")
-                history_dropdown = gr.Dropdown(choices=[], label="Previous Chats", interactive=True)
-                clear_btn = gr.Button("Archive Current Session", variant="secondary", elem_classes="sidebar-btn")
+    # --- 3. MAIN CHAT AREA ---
+    with ui.column().classes('w-full h-screen relative') as main_chat_view:
+        main_chat_view.set_visibility(False)
+        
+        # Header row for drawer toggle
+        with ui.row().classes('w-full p-4 border-b border-[#27272a] bg-[#121217] items-center z-10'):
+            ui.button(icon='menu', on_click=drawer.toggle).props('flat round dense color=white')
+            ui.label('DACodeX - Academic Core').classes('text-xl font-bold ml-2 text-white')
 
-                gr.Markdown("---")
-                download_btn = gr.Button("Download Text File", variant="primary", elem_classes="sidebar-btn")
-                transcript_file = gr.File(label="Download Ready", visible=False)
+        # Chat Messages Area
+        with ui.scroll_area().classes('flex-grow w-full p-4 pb-32') as scroll_area:
+            @ui.refreshable
+            def render_messages():
+                for msg in chat_history:
+                    with ui.chat_message(text=msg['text'], name=msg['name'], sent=msg['sent']):
+                        # Render images if attached
+                        for img_html in msg.get('images', []):
+                            ui.html(img_html).classes('max-w-xs rounded mt-2')
+            
+            render_messages()
 
-            with gr.Column(scale=4):
-                toggle_sidebar_btn = gr.Button("◀ Hide Sidebar", size="sm", elem_classes="toggle-btn")
+        # Input Area (Pinned to bottom)
+        with ui.row().classes('absolute bottom-0 w-full p-4 bg-[#09090b] border-t border-[#27272a] items-end z-10'):
+            
+            def handle_upload(e: events.UploadEventArguments):
+                filename = e.name
+                ext = filename.split('.')[-1].lower()
+                content = e.content.read()
                 
-                chat_ui = gr.ChatInterface(
-                    fn=chat_logic,
-                    additional_inputs=[mode_selector, language_selector, course_selector],
-                    chatbot=gr.Chatbot(height=600, elem_id="chatbot-window", label="DACodeX"),
-                    multimodal=True
-                )
+                if ext in ['png', 'jpg', 'jpeg', 'webp', 'gif']:
+                    try:
+                        img = Image.open(io.BytesIO(content))
+                        pending_uploads.append({'type': 'image', 'data': img, 'name': filename})
+                        ui.notify(f"Attached Image: {filename}", type='positive')
+                    except Exception as ex:
+                        ui.notify(f"Error loading image: {ex}", color='negative')
+                else:
+                    try:
+                        text_content = content.decode('utf-8', errors='ignore')
+                        pending_uploads.append({'type': 'text', 'data': f"\n\n--- Uploaded File: {filename} ---\n{text_content}", 'name': filename})
+                        ui.notify(f"Attached File: {filename}", type='positive')
+                    except Exception as ex:
+                        ui.notify(f"Could not read file {filename}: {ex}", color='negative')
+                
+                upload_element.reset()
 
-    # --- UI LOGIC / EVENTS ---
-    def start_app():
-        return gr.update(visible=False), gr.update(visible=True)
+            # The invisible uploader component
+            upload_element = ui.upload(multiple=True, auto_upload=True, on_upload=handle_upload).classes('absolute w-0 h-0 opacity-0 overflow-hidden -z-10')
+            
+            # The visible icon button that triggers the hidden uploader's file dialog via JS
+            ui.button(icon='attach_file', on_click=lambda: ui.run_javascript('document.querySelector(".q-uploader__input")?.click()')).props('flat round dense color=white').classes('mb-2')
 
-    def toggle_info(show):
-        return gr.update(visible=show)
+            text_input = ui.input(placeholder="Type your message...").classes('flex-grow mx-2').props('outlined dark rounded')
+            
+            async def send_message():
+                user_text = text_input.value.strip()
+                if not user_text and not pending_uploads:
+                    ui.notify("Please provide some text or an image.", color='warning')
+                    return
+                    
+                # 1. Build Payload and UI Message
+                payload = []
+                images_for_ui = []
+                raw_text_record = user_text
+                
+                if user_text:
+                    payload.append(user_text)
+                    
+                for item in pending_uploads:
+                    if item['type'] == 'image':
+                        payload.append(item['data'])
+                        raw_text_record += f"\n[Uploaded Image: {item['name']}]"
+                        # For UI display, convert PIL to base64
+                        import base64
+                        buffered = io.BytesIO()
+                        item['data'].save(buffered, format="PNG")
+                        img_str = base64.b64encode(buffered.getvalue()).decode()
+                        images_for_ui.append(f'<img src="data:image/png;base64,{img_str}" />')
+                    elif item['type'] == 'text':
+                        payload.append(item['data'])
+                        raw_text_record += f"\n[Uploaded File: {item['name']}]"
 
-    start_button.click(fn=start_app, outputs=[landing_page, main_app])
+                # 2. Add User Message to UI
+                chat_history.append({
+                    'text': user_text if user_text else "📎 (Attachments)", 
+                    'name': 'Student', 
+                    'sent': True, 
+                    'role': 'user',
+                    'raw_text': raw_text_record,
+                    'images': images_for_ui
+                })
+                
+                text_input.value = ""
+                pending_uploads.clear()
+                render_messages.refresh()
+                scroll_area.scroll_to(percent=1)
 
-    info_btn.click(fn=lambda: toggle_info(True), outputs=info_panel)
-    close_info_btn.click(fn=lambda: toggle_info(False), outputs=info_panel)
+                # 3. Setup GenAI API Call Structure
+                current_instruction = build_system_prompt(mode_select.value, language_select.value, course_select.value)
+                
+                gemini_history = []
+                for msg in chat_history[:-1]:  # Exclude the message we just added (it goes in payload)
+                    role = msg['role']
+                    # Simplified history recreation for API
+                    gemini_history.append(types.Content(role=role, parts=[types.Part.from_text(text=msg['raw_text'])]))
 
-    clear_btn.click(
-        archive_and_clear,
-        inputs=[chat_ui.chatbot, session_storage],
-        outputs=[session_storage, chat_ui.chatbot, history_dropdown]
+                try:
+                    # 4. Async API Call to prevent GUI Freezing
+                    chat = client.aio.chats.create(
+                        model=MODEL_ID,
+                        config=types.GenerateContentConfig(
+                            system_instruction=current_instruction,
+                            temperature=0.7 if mode_select.value == "Socratic" else 0.2
+                        ),
+                        history=gemini_history
+                    )
+                    
+                    # Add empty AI message to UI
+                    chat_history.append({'text': '', 'name': 'DACodeX', 'sent': False, 'role': 'model', 'raw_text': ''})
+                    render_messages.refresh()
+                    scroll_area.scroll_to(percent=1)
+                    
+                    response_stream = await chat.send_message_stream(payload)
+                    full_response = ""
+                    
+                    async for chunk in response_stream:
+                        if chunk.text:
+                            full_response += chunk.text
+                            chat_history[-1]['text'] = full_response
+                            chat_history[-1]['raw_text'] = full_response
+                            render_messages.refresh()
+                            scroll_area.scroll_to(percent=1)
+                            
+                except Exception as e:
+                    ui.notify(f"🤖 Technical Hiccup: {str(e)}", color='negative')
+            
+            text_input.on('keydown.enter', send_message)
+            ui.button(icon='send', on_click=send_message).props('flat round dense color=primary').classes('mb-2')
+
+    # --- 4. INTERFACE STARTUP LOGIC ---
+    def start_interface():
+        landing_view.set_visibility(False)
+        main_chat_view.set_visibility(True)
+        drawer.value = True # Triggers the sidebar to slide out smoothly
+        
+    # Wire the button to the function we just defined
+    start_btn.on_click(start_interface)
+
+
+# --- INITIALIZATION (NATIVE DESKTOP MODE) ---
+if __name__ in {"__main__", "__mp_main__"}:
+    # Runs the application as a standalone desktop window using PyWebView
+    ui.run(
+        native=True, 
+        window_size=(1200, 800), 
+        title="DACodeX - Academic Core", 
+        dark=True,
+        show=True
     )
-
-    download_btn.click(
-        save_transcript,
-        inputs=[chat_ui.chatbot],
-        outputs=[transcript_file]
-    ).then(
-        lambda: gr.update(visible=True), None, transcript_file
-    )
-
-    history_dropdown.change(
-        load_from_history,
-        inputs=[history_dropdown, session_storage],
-        outputs=[chat_ui.chatbot]
-    )
-
-    toggle_sidebar_btn.click(
-        toggle_sidebar_func,
-        inputs=[sidebar_state],
-        outputs=[sidebar_state, sidebar_col, toggle_sidebar_btn]
-    )
-
-if __name__ == "__main__":
-    demo.launch(theme=dacodex_theme, css=custom_css)
