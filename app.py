@@ -147,11 +147,63 @@ def main_page():
             transform: scale(1.05) !important;
         }
         
-        /* Message Text Colors - Forced White */
+        /* Message Text Colors */
         .q-message-text { background-color: #121217 !important; border: 1px solid #27272a; }
         .q-message-text--sent { background-color: #dc2626 !important; border: none; }
-        .q-message-text-content { color: #ffffff !important; }
         .q-message-name { color: #D1D5DB !important; }
+        
+        /* === MARKDOWN SPECIFIC STYLING === */
+        .q-message-text-content { color: #ffffff !important; }
+        .q-message-text-content p { margin: 0 0 0.5em 0; color: #ffffff !important; }
+        .q-message-text-content p:last-child { margin-bottom: 0; }
+        .q-message-text-content a { color: #ef4444; font-weight: bold; }
+        
+        /* Lists Fix for Quasar Reset */
+        .q-message-text-content ul {
+            list-style-type: disc !important;
+            padding-left: 1.5em !important;
+            margin-top: 0.5em !important;
+            margin-bottom: 0.5em !important;
+        }
+        .q-message-text-content ol {
+            list-style-type: decimal !important;
+            padding-left: 1.5em !important;
+            margin-top: 0.5em !important;
+            margin-bottom: 0.5em !important;
+        }
+        .q-message-text-content li {
+            display: list-item !important;
+            margin-bottom: 0.25em !important;
+            color: #ffffff !important;
+        }
+        
+        /* Inline code (e.g., `print()`) */
+        .q-message-text-content :not(pre) > code { 
+            background-color: #27272a; 
+            color: #ffb3c1; 
+            padding: 2px 6px; 
+            border-radius: 4px; 
+            font-family: 'JetBrains Mono', monospace;
+            font-size: 0.9em;
+        }
+        
+        /* Code blocks (e.g., ```python ... ```) */
+        .q-message-text-content pre { 
+            background-color: #09090b !important; 
+            border: 1px solid #27272a; 
+            padding: 12px; 
+            border-radius: 8px; 
+            overflow-x: auto;
+            margin: 0.5em 0;
+        }
+        .q-message-text-content pre code { 
+            color: #e4e4e7; 
+            background-color: transparent; 
+            padding: 0; 
+            font-family: 'JetBrains Mono', monospace;
+            font-size: 0.9em;
+        }
+        /* ================================= */
         
         .drawer-bg { background-color: #121217 !important; border-right: 1px solid #27272a; }
     """)
@@ -242,7 +294,12 @@ def main_page():
             @ui.refreshable
             def render_messages():
                 for msg in chat_history:
-                    with ui.chat_message(text=msg['text'], name=msg['name'], sent=msg['sent']):
+                    # Note: We NO LONGER pass text=msg['text'] here. 
+                    # We pass the text into ui.markdown() inside the context manager instead!
+                    with ui.chat_message(name=msg['name'], sent=msg['sent']):
+                        # Renders the text as rich Markdown with support for breaks and cuddled lists
+                        ui.markdown(msg['text'], extras=['fenced-code-blocks', 'tables', 'cuddled-lists', 'breaks'])
+                        
                         # Render images if attached
                         for img_html in msg.get('images', []):
                             ui.html(img_html).classes('max-w-xs rounded mt-2')
@@ -312,7 +369,7 @@ def main_page():
 
                 # 2. Add User Message to UI
                 chat_history.append({
-                    'text': user_text if user_text else "📎 (Attachments)", 
+                    'text': user_text if user_text else "📎 *(Attachments sent)*", 
                     'name': 'Student', 
                     'sent': True, 
                     'role': 'user',
