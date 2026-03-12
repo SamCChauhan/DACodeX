@@ -6,10 +6,10 @@ import datetime
 import os
 import asyncio
 import io
+import base64
 
 # --- 1. SETUP & MODULAR PROMPT LIBRARY ---
 API_KEY = os.environ.get('GOOGLE_API_KEY')
-
 try:
     if not API_KEY:
         print("⚠️ Warning: GOOGLE_API_KEY not found. Set it in your environment variables.")
@@ -18,81 +18,67 @@ try:
 except Exception as e:
     print(f"❌ Initialization Error: {e}")
 
-MODEL_ID = "gemini-2.5-flash"
+MODEL_ID = "gemini-2.5-flash-lite"
 
 # --- SYSTEM PROMPT FRAGMENTS (PRESERVED) ---
-BASE_PERSONA = """
-ROLE: You are 'Code Mentor,' a Coding Trainer Chatbot intended for use in a high-school programming classroom.
+BASE_PERSONA = """ROLE: You are 'Code Mentor,' a Coding Trainer Chatbot intended for use in a high-school programming classroom.
 VISION: You are a MULTIMODAL AI. You have vision capabilities. You can seamlessly see, read, and analyze uploaded images, screenshots of code or errors, flowcharts, and architecture diagrams.
 Your primary goal is to assist students in learning to program by explaining concepts, guiding problem-solving,
-and supporting debugging. You are currently tutoring a student in the '{course}' curriculum, focusing on the '{language}' programming language.
-"""
+and supporting debugging. You are currently tutoring a student in the '{course}' curriculum, focusing on the '{language}' programming language."""
 
-PEDAGOGY_SOCRATIC = """
-STRATEGY (SOCRATIC MODE):
+PEDAGOGY_SOCRATIC = """STRATEGY (SOCRATIC MODE):
 - Act like a good instructor, not like Stack Overflow.
 - Use scaffolded instruction: hints → partial guidance → full solution (only as an absolute last resort).
 - Ask guiding questions to encourage student reasoning and productive struggle before revealing answers.
-- Never act as a shortcut solution generator.
-"""
+- Never act as a shortcut solution generator."""
 
-PEDAGOGY_DIRECT = """
-STRATEGY (DIRECT INSTRUCTION MODE):
+PEDAGOGY_DIRECT = """STRATEGY (DIRECT INSTRUCTION MODE):
 - Provide direct, clear explanations of concepts and syntax.
 - Use very small code snippets (max 3-5 lines) to demonstrate specific rules.
 - Explain the 'WHY' behind the code and how the computer handles it.
-- Do not write their entire assignment for them; focus on the specific concept they are stuck on.
-"""
+- Do not write their entire assignment for them; focus on the specific concept they are stuck on."""
 
-CODE_AWARENESS = """
-CODE & LANGUAGE CAPABILITIES:
+CODE_AWARENESS = """CODE & LANGUAGE CAPABILITIES:
 - You fully understand the syntax, semantics, and common beginner mistakes of {language}.
 - When evaluating {language} code or reviewing screenshots of code, explain what it does, why it fails, and how to fix it.
-- Use simple, precise, age-appropriate explanations, avoiding heavy professional jargon.
-"""
+- Use simple, precise, age-appropriate explanations, avoiding heavy professional jargon."""
 
-ERROR_HANDLING = """
-ERROR FOCUS & DEBUGGING-FIRST:
+ERROR_HANDLING = """ERROR FOCUS & DEBUGGING-FIRST:
 - Treat errors as learning opportunities, not failures.
 - Interpret compiler errors, runtime errors, and logic errors in plain English.
 - Encourage debugging strategies: code tracing, print statements, test cases, and rubber-duck reasoning.
-- Sound like a teacher during a test: "I can help you think through the logic, but I can't write the code for you here."
-"""
+- Sound like a teacher during a test: "I can help you think through the logic, but I can't write the code for you here." """
 
-ADAPTABILITY_AND_TONE = """
-ADAPTABILITY & TONE (AFFECTIVE COMPUTING):
+ADAPTABILITY_AND_TONE = """ADAPTABILITY & TONE (AFFECTIVE COMPUTING):
 - Detect the student's level based on their questions and code complexity, adjusting your vocabulary, pace, and depth.
 - Challenge advanced students with "What if..." scenarios, optimization prompts, and edge-case analysis.
 - Maintain a patient, non-judgmental, calm, and encouraging tone.
-- Use phrases like "You're close" or "This is a common mistake." Never shame or ridicule; normalize confusion.
-"""
+- Use phrases like "You're close" or "This is a common mistake." Never shame or ridicule; normalize confusion."""
 
-TRANSPARENCY_AND_ASSESSMENT = """
-TRANSPARENCY & ASSESSMENT AWARENESS:
+TRANSPARENCY_AND_ASSESSMENT = """TRANSPARENCY & ASSESSMENT AWARENESS:
 - No Black Boxes: Explain why a solution works. Show step-by-step execution, variable state changes, or call stack evolution.
 - Encourage mental models, not memorization.
 - Understand AP-style coding task verbs: Predict, Trace, Debug, Modify.
 - Can simulate Free-Response Questions, output prediction, and code completion.
 - Grade and evaluate the student's *thinking* and logic, not just the correctness of the final code.
-- Prevent misuse: Never complete graded assignments for the student. Prioritize student learning over speed of answers.
-"""
+- Prevent misuse: Never complete graded assignments for the student. Prioritize student learning over speed of answers."""
 
 def build_system_prompt(mode, language, course):
     lang_label = language if language else "General Programming"
     course_label = course if course else "General Computer Science"
     prompt_parts = [BASE_PERSONA.format(course=course_label, language=lang_label)]
-
+    
     if mode == "Socratic":
         prompt_parts.append(PEDAGOGY_SOCRATIC)
     else:
         prompt_parts.append(PEDAGOGY_DIRECT)
-
+        
     prompt_parts.append(CODE_AWARENESS.format(language=lang_label))
     prompt_parts.append(ERROR_HANDLING)
     prompt_parts.append(ADAPTABILITY_AND_TONE)
     prompt_parts.append(TRANSPARENCY_AND_ASSESSMENT)
+    
     return "\n\n".join(prompt_parts)
-
 
 # --- STATE MANAGEMENT ---
 chat_history = []  # Stores UI messages
@@ -106,24 +92,24 @@ def get_logo(width=400, height=100):
             <defs>
                 <filter id="neonRed" x="-20%" y="-20%" width="140%" height="140%">
                     <feGaussianBlur stdDeviation="3" result="blur" />
+                    <feDropShadow dx="0" dy="0" stdDeviation="5" flood-color="#dc2626" />
                     <feComposite in="SourceGraphic" in2="blur" operator="over" />
                 </filter>
             </defs>
             <path d="M40 30L20 50L40 70" stroke="#dc2626" stroke-width="5" stroke-linecap="round" filter="url(#neonRed)"/>
             <path d="M70 30L90 50L70 70" stroke="#dc2626" stroke-width="5" stroke-linecap="round" filter="url(#neonRed)"/>
-            <text x="100" y="65" fill="white" style="font-family:'JetBrains Mono', monospace; font-weight:800; font-size:45px;">DA</text>
+            <text x="100" y="65" fill="#ffffff" style="font-family:'JetBrains Mono', monospace; font-weight:800; font-size:45px;">DA</text>
             <text x="165" y="65" fill="#dc2626" style="font-family:'JetBrains Mono', monospace; font-weight:800; font-size:45px;" filter="url(#neonRed)">CODE</text>
-            <text x="285" y="65" fill="white" style="font-family:'JetBrains Mono', monospace; font-weight:200; font-size:45px;">X</text>
-            <rect x="100" y="75" width="230" height="2" fill="#dc2626" fill-opacity="0.3"/>
+            <text x="285" y="65" fill="#ffffff" style="font-family:'JetBrains Mono', monospace; font-weight:200; font-size:45px;">X</text>
+            <rect x="100" y="75" width="230" height="2" fill="#dc2626" fill-opacity="0.5"/>
         </svg>
     </div>
     """
 
 # --- UI COMPONENTS & LOGIC ---
-
 @ui.page('/')
 def main_page():
-    # --- STYLING ---
+    # --- STYLING (RED THEME RESTORED) ---
     ui.add_css("""
         @import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;800&display=swap');
         body { background-color: #09090b; color: #e4e4e7; font-family: 'JetBrains Mono', monospace; }
@@ -137,18 +123,18 @@ def main_page():
             animation: flicker 0.15s infinite;
         }
         .start-btn {
-            border: 1px solid #ef4444 !important;
+            border: 1px solid #dc2626 !important;
             box-shadow: 0 0 15px rgba(220, 38, 38, 0.4);
             letter-spacing: 2px;
             transition: all 0.3s ease !important;
         }
         .start-btn:hover {
-            box-shadow: 0 0 30px rgba(239, 68, 68, 0.8);
+            box-shadow: 0 0 30px rgba(220, 38, 38, 0.8);
             transform: scale(1.05) !important;
         }
         
-        /* Message Text Colors */
-        .q-message-text { background-color: #121217 !important; border: 1px solid #27272a; }
+        /* Message Text Colors (RED) */
+        .q-message-text { background-color: #121217 !important; border: 1px solid #27272a; position: relative; }
         .q-message-text--sent { background-color: #dc2626 !important; border: none; }
         .q-message-name { color: #D1D5DB !important; }
         
@@ -179,36 +165,85 @@ def main_page():
         
         /* Inline code (e.g., `print()`) */
         .q-message-text-content :not(pre) > code { 
-            background-color: #27272a; 
-            color: #ffb3c1; 
-            padding: 2px 6px; 
-            border-radius: 4px; 
-            font-family: 'JetBrains Mono', monospace;
+             background-color: #27272a; 
+             color: #ffb3c1; 
+             padding: 2px 6px; 
+             border-radius: 4px; 
+             font-family: 'JetBrains Mono', monospace;
             font-size: 0.9em;
         }
         
         /* Code blocks (e.g., ```python ... ```) */
         .q-message-text-content pre { 
-            background-color: #09090b !important; 
-            border: 1px solid #27272a; 
-            padding: 12px; 
-            border-radius: 8px; 
-            overflow-x: auto;
+             position: relative;
+             background-color: #09090b !important; 
+             border: 1px solid #27272a; 
+             padding: 12px; 
+             border-radius: 8px; 
+             overflow-x: auto;
             margin: 0.5em 0;
         }
         .q-message-text-content pre code { 
-            color: #e4e4e7; 
-            background-color: transparent; 
-            padding: 0; 
-            font-family: 'JetBrains Mono', monospace;
+             color: #e4e4e7; 
+             background-color: transparent; 
+             padding: 0; 
+             font-family: 'JetBrains Mono', monospace;
             font-size: 0.9em;
         }
+
+        /* Copy Button Style */
+        .copy-btn {
+            position: absolute;
+            top: 5px;
+            right: 5px;
+            padding: 4px 8px;
+            background: #27272a;
+            color: #e4e4e7;
+            border: 1px solid #dc2626;
+            border-radius: 4px;
+            font-size: 10px;
+            cursor: pointer;
+            z-index: 10;
+            opacity: 0.6;
+            transition: opacity 0.2s;
+        }
+        .copy-btn:hover { opacity: 1; background: #dc2626; }
         /* ================================= */
         
         .drawer-bg { background-color: #121217 !important; border-right: 1px solid #27272a; }
     """)
-
     ui.colors(primary='#dc2626', secondary='#121217', accent='#ef4444')
+
+    # Injecting JavaScript to handle the copy functionality dynamically
+    ui.add_head_html("""
+        <script>
+        function copyCode(btn) {
+            const pre = btn.parentElement;
+            const code = pre.querySelector('code').innerText;
+            navigator.clipboard.writeText(code).then(() => {
+                const oldText = btn.innerText;
+                btn.innerText = 'COPIED!';
+                setTimeout(() => { btn.innerText = oldText; }, 2000);
+            });
+        }
+
+        // Observer to add buttons to new code blocks as they appear
+        const observer = new MutationObserver((mutations) => {
+            document.querySelectorAll('pre:not(.has-copy-btn)').forEach((pre) => {
+                pre.classList.add('has-copy-btn');
+                const btn = document.createElement('button');
+                btn.className = 'copy-btn';
+                btn.innerText = 'COPY';
+                btn.onclick = function() { copyCode(this); };
+                pre.appendChild(btn);
+            });
+        });
+
+        document.addEventListener('DOMContentLoaded', () => {
+            observer.observe(document.body, { childList: true, subtree: true });
+        });
+        </script>
+    """)
 
     # --- 1. LANDING PAGE ---
     with ui.column().classes('w-full items-center justify-center landing-container') as landing_view:
@@ -222,15 +257,20 @@ def main_page():
         
         with ui.dialog() as info_dialog, ui.card().classes('bg-[#1a1a23] border border-[#dc2626] text-white'):
             ui.markdown("""
-            **<u>Teaching Protocol:</u>**
-            * **Socratic:** AI hints and asks questions to guide you.
-            * **Direct:** AI explains concepts and gives examples immediately.
-            **<u>Upload Images & Code:</u>**
-            Use the 📎 icon in the chat bar to upload screenshots of errors, flowcharts, or even raw `.py` files!
-            **<u>Archive Current Session:</u>**
-            Saves current chat in 'Previous Chats' and creates a new session.
-            """)
-            ui.button('Close', on_click=info_dialog.close)
+**<u>Teaching Protocol:</u>**
+
+* **Socratic:** AI hints and asks questions to guide you.
+* **Direct:** AI explains concepts and gives examples immediately.
+
+**<u>Upload Images & Code:</u>**
+
+* Use the 📎 icon in the chat bar to upload screenshots of errors, flowcharts, or even raw `.py` files!
+
+**<u>Archive Current Session:</u>**
+
+* Saves current chat in 'Previous Chats' and creates a new session.
+            """).classes('p-4')
+            ui.button('Close', on_click=info_dialog.close).classes('mt-2')
         
         ui.button("ℹ️ Quick Guide", on_click=info_dialog.open).props('outline rounded size=sm').classes('w-full mb-4 text-white')
         ui.separator()
@@ -261,7 +301,6 @@ def main_page():
                 chat_history.clear()
                 chat_history.extend(session_storage[e.value])
                 render_messages.refresh()
-
         history_dropdown.on_value_change(load_session)
         
         ui.separator().classes('my-4')
@@ -270,7 +309,7 @@ def main_page():
             if not chat_history:
                 ui.notify("No chat history to save.", type="warning")
                 return
-                
+            
             transcript_text = "DACODEX MENTOR SESSION\n" + "="*30 + "\n\n"
             for msg in chat_history:
                 prefix = "STUDENT" if msg["role"] == "user" else "MENTOR"
@@ -279,10 +318,9 @@ def main_page():
             filename = f"DACodeX_Transcript_{datetime.datetime.now().strftime('%Y%m%d_%H%M')}.txt"
             
             try:
-                # Reliably save locally by targeting the user's Downloads folder
                 downloads_path = os.path.join(os.path.expanduser('~'), 'Downloads')
                 if not os.path.exists(downloads_path):
-                    downloads_path = os.getcwd() # Fallback
+                    downloads_path = os.getcwd() 
                 
                 full_path = os.path.join(downloads_path, filename)
                 
@@ -299,60 +337,102 @@ def main_page():
     with ui.column().classes('w-full h-screen relative') as main_chat_view:
         main_chat_view.set_visibility(False)
         
-        # Header row for drawer toggle
         with ui.row().classes('w-full p-4 border-b border-[#27272a] bg-[#121217] items-center z-10'):
             ui.button(icon='menu', on_click=drawer.toggle).props('flat round dense color=white')
             ui.label('DACodeX - Academic Core').classes('text-xl font-bold ml-2 text-white')
 
-        # Chat Messages Area
-        with ui.scroll_area().classes('flex-grow w-full p-4 pb-32') as scroll_area:
+        with ui.scroll_area().classes('flex-grow w-full p-4 pb-40') as scroll_area:
             @ui.refreshable
             def render_messages():
-                for msg in chat_history:
-                    # Note: We NO LONGER pass text=msg['text'] here. 
-                    # We pass the text into ui.markdown() inside the context manager instead!
+                for index, msg in enumerate(chat_history):
+                    # STUDENT IS ON THE RIGHT (sent=True), MENTOR IS ON THE LEFT (sent=False)
                     with ui.chat_message(name=msg['name'], sent=msg['sent']):
-                        # Renders the text as rich Markdown with support for breaks and cuddled lists
                         ui.markdown(msg['text'], extras=['fenced-code-blocks', 'tables', 'cuddled-lists', 'breaks'])
-                        
-                        # Render images if attached
                         for img_html in msg.get('images', []):
                             ui.html(img_html).classes('max-w-xs rounded mt-2')
-            
+
             render_messages()
 
-        # Input Area (Pinned to bottom)
-        with ui.row().classes('absolute bottom-0 w-full p-4 bg-[#09090b] border-t border-[#27272a] items-end z-10'):
+        # --- 4. UNIFIED CHAT INPUT BOX (Gemini Style) ---
+        with ui.column().classes('absolute bottom-0 w-full p-4 bg-[#09090b] border-t border-[#27272a] z-10'):
             
-            def handle_upload(e: events.UploadEventArguments):
-                filename = e.name
-                ext = filename.split('.')[-1].lower()
-                content = e.content.read()
-                
-                if ext in ['png', 'jpg', 'jpeg', 'webp', 'gif']:
-                    try:
-                        img = Image.open(io.BytesIO(content))
-                        pending_uploads.append({'type': 'image', 'data': img, 'name': filename})
-                        ui.notify(f"Attached Image: {filename}", type='positive')
-                    except Exception as ex:
-                        ui.notify(f"Error loading image: {ex}", color='negative')
-                else:
-                    try:
-                        text_content = content.decode('utf-8', errors='ignore')
-                        pending_uploads.append({'type': 'text', 'data': f"\n\n--- Uploaded File: {filename} ---\n{text_content}", 'name': filename})
-                        ui.notify(f"Attached File: {filename}", type='positive')
-                    except Exception as ex:
-                        ui.notify(f"Could not read file {filename}: {ex}", color='negative')
-                
-                upload_element.reset()
-
-            # The invisible uploader component
-            upload_element = ui.upload(multiple=True, auto_upload=True, on_upload=handle_upload).classes('absolute w-0 h-0 opacity-0 overflow-hidden -z-10')
+            async def handle_native_upload():
+                """Opens the native file dialog safely using PyWebView."""
+                try:
+                    if not app.native.main_window:
+                        ui.notify("Window not fully loaded yet.", color="warning")
+                        return
+                    
+                    # By explicitly passing integer '10' (which evaluates to OPEN_DIALOG inside pywebview),
+                    # we completely bypass all deprecation warnings and cross-process PicklingErrors!
+                    file_paths = await app.native.main_window.create_file_dialog(
+                        dialog_type=10, 
+                        allow_multiple=True,
+                        file_types=('Supported Files (*.png;*.jpg;*.jpeg;*.gif;*.webp;*.py;*.txt;*.md;*.js;*.html;*.css)', 'All Files (*.*)')
+                    )
+                    
+                    if not file_paths:
+                        return # User canceled the dialog
+                        
+                    for filepath in file_paths:
+                        if not os.path.exists(filepath):
+                            continue
+                        
+                        filename = os.path.basename(filepath)
+                        ext = filename.split('.')[-1].lower() if '.' in filename else ''
+                        
+                        try:
+                            with open(filepath, 'rb') as f:
+                                content_bytes = f.read()
+                                
+                            if ext in ['png', 'jpg', 'jpeg', 'webp', 'gif']:
+                                img = Image.open(io.BytesIO(content_bytes))
+                                pending_uploads.append({'type': 'image', 'data': img, 'name': filename})
+                                ui.notify(f"Attached Image: {filename}", type='positive')
+                            else:
+                                text_content = content_bytes.decode('utf-8', errors='ignore')
+                                pending_uploads.append({'type': 'text', 'data': f"\n\n--- Uploaded File: {filename} ---\n{text_content}", 'name': filename})
+                                ui.notify(f"Attached File: {filename}", type='positive')
+                        except Exception as ex:
+                            ui.notify(f"Could not read file {filename}: {ex}", color='negative')
+                    
+                    render_previews.refresh() # Update the preview thumbnails
+                except Exception as e:
+                    ui.notify(f"Upload failed: {e}", color="negative")
             
-            # The visible icon button that triggers the hidden uploader's file dialog via JS
-            ui.button(icon='attach_file', on_click=lambda: ui.run_javascript('document.querySelector(".q-uploader__input")?.click()')).props('flat round dense color=white').classes('mb-2')
+            # Unified Container Box
+            with ui.column().classes('w-full bg-[#121217] border border-[#27272a] rounded-xl p-1 gap-0'):
+                
+                # Dynamic Preview Area (Renders directly above the text input)
+                @ui.refreshable
+                def render_previews():
+                    if pending_uploads:
+                        with ui.row().classes('w-full gap-3 px-3 pt-3 pb-1 overflow-x-auto no-wrap'):
+                            for idx, item in enumerate(pending_uploads):
+                                with ui.card().classes('w-16 h-16 p-0 bg-[#09090b] border border-[#3f3f46] rounded-lg relative shadow-none flex-shrink-0 flex items-center justify-center'):
+                                    if item['type'] == 'image':
+                                        buffered = io.BytesIO()
+                                        item['data'].save(buffered, format="PNG")
+                                        img_str = base64.b64encode(buffered.getvalue()).decode()
+                                        ui.html(f'<img src="data:image/png;base64,{img_str}" style="width: 100%; height: 100%; object-fit: cover; border-radius: 6px;" />')
+                                    else:
+                                        ui.label('📄').classes('text-2xl')
+                                    
+                                    # Cross button to remove attachment
+                                    def remove_item(i=idx):
+                                        pending_uploads.pop(i)
+                                        render_previews.refresh()
+                                    
+                                    ui.button(icon='close', on_click=remove_item).props('flat round dense size=xs color=white').classes('absolute -top-2 -right-2 bg-[#dc2626] rounded-full z-10 w-5 h-5 min-h-0 min-w-0 p-0 shadow')
+                
+                render_previews()
 
-            text_input = ui.input(placeholder="Type your message...").classes('flex-grow mx-2').props('outlined dark rounded')
+                # Text Input Row
+                with ui.row().classes('w-full items-center no-wrap px-1 pb-1'):
+                    # This now hooks directly into PyWebView's thread-safe dialog using our integer bypass!
+                    ui.button(icon='attach_file', on_click=handle_native_upload).props('flat round dense color=white')
+                    text_input = ui.input(placeholder="Type your message...").classes('flex-grow px-2').props('borderless dark')
+                    ui.button(icon='send', on_click=lambda: asyncio.create_task(send_message())).props('flat round dense color=primary')
             
             async def send_message():
                 user_text = text_input.value.strip()
@@ -360,7 +440,6 @@ def main_page():
                     ui.notify("Please provide some text or an image.", color='warning')
                     return
                     
-                # 1. Build Payload and UI Message
                 payload = []
                 images_for_ui = []
                 raw_text_record = user_text
@@ -372,8 +451,6 @@ def main_page():
                     if item['type'] == 'image':
                         payload.append(item['data'])
                         raw_text_record += f"\n[Uploaded Image: {item['name']}]"
-                        # For UI display, convert PIL to base64
-                        import base64
                         buffered = io.BytesIO()
                         item['data'].save(buffered, format="PNG")
                         img_str = base64.b64encode(buffered.getvalue()).decode()
@@ -382,9 +459,10 @@ def main_page():
                         payload.append(item['data'])
                         raw_text_record += f"\n[Uploaded File: {item['name']}]"
 
-                # 2. Add User Message to UI
+                # STUDENT ON RIGHT (sent=True)
                 chat_history.append({
                     'text': user_text if user_text else "📎 *(Attachments sent)*", 
+                    'user_input_only': user_text, # Save for context
                     'name': 'Student', 
                     'sent': True, 
                     'role': 'user',
@@ -394,20 +472,18 @@ def main_page():
                 
                 text_input.value = ""
                 pending_uploads.clear()
+                render_previews.refresh() # Clear previews from UI box
                 render_messages.refresh()
                 scroll_area.scroll_to(percent=1)
 
-                # 3. Setup GenAI API Call Structure
                 current_instruction = build_system_prompt(mode_select.value, language_select.value, course_select.value)
                 
                 gemini_history = []
-                for msg in chat_history[:-1]:  # Exclude the message we just added (it goes in payload)
+                for msg in chat_history[:-1]:
                     role = msg['role']
-                    # Simplified history recreation for API
                     gemini_history.append(types.Content(role=role, parts=[types.Part.from_text(text=msg['raw_text'])]))
 
                 try:
-                    # 4. Async API Call to prevent GUI Freezing
                     chat = client.aio.chats.create(
                         model=MODEL_ID,
                         config=types.GenerateContentConfig(
@@ -417,45 +493,47 @@ def main_page():
                         history=gemini_history
                     )
                     
-                    # Add empty AI message to UI
+                    # MENTOR ON LEFT (sent=False)
                     chat_history.append({'text': '', 'name': 'DACodeX', 'sent': False, 'role': 'model', 'raw_text': ''})
                     render_messages.refresh()
                     scroll_area.scroll_to(percent=1)
                     
                     response_stream = await chat.send_message_stream(payload)
                     full_response = ""
+                    displayed_text = ""
                     
                     async for chunk in response_stream:
                         if chunk.text:
                             full_response += chunk.text
-                            chat_history[-1]['text'] = full_response
-                            chat_history[-1]['raw_text'] = full_response
-                            render_messages.refresh()
-                            scroll_area.scroll_to(percent=1)
-                            
+                            while len(displayed_text) < len(full_response):
+                                chars_to_add = min(len(full_response) - len(displayed_text), 5) 
+                                displayed_text += full_response[len(displayed_text):len(displayed_text) + chars_to_add]
+                                
+                                chat_history[-1]['text'] = displayed_text
+                                chat_history[-1]['raw_text'] = full_response
+                                render_messages.refresh()
+                                scroll_area.scroll_to(percent=1)
+                                
+                                await asyncio.sleep(0.02)
+                                
                 except Exception as e:
                     ui.notify(f"🤖 Technical Hiccup: {str(e)}", color='negative')
-            
-            text_input.on('keydown.enter', send_message)
-            ui.button(icon='send', on_click=send_message).props('flat round dense color=primary').classes('mb-2')
 
-    # --- 4. INTERFACE STARTUP LOGIC ---
+            text_input.on('keydown.enter', send_message)
+
     def start_interface():
         landing_view.set_visibility(False)
         main_chat_view.set_visibility(True)
-        drawer.value = True # Triggers the sidebar to slide out smoothly
-        
-    # Wire the button to the function we just defined
+        drawer.value = True 
+    
     start_btn.on_click(start_interface)
 
-
-# --- INITIALIZATION (NATIVE DESKTOP MODE) ---
+# --- INITIALIZATION ---
 if __name__ in {"__main__", "__mp_main__"}:
-    # Runs the application as a standalone desktop window using PyWebView
     ui.run(
-        native=True, 
-        window_size=(1200, 800), 
         title="DACodeX - Academic Core", 
         dark=True,
-        show=True
+        native=True,  # <--- THIS IS THE KEY: It opens in a window
+        window_size=(1200, 800), # Optional: Set your preferred start size
+        reload=False
     )
