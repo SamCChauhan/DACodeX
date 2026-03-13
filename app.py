@@ -210,7 +210,7 @@ def main_page():
         .copy-btn:hover { opacity: 1; background: #dc2626; }
         /* ================================= */
         
-        .drawer-bg { background-color: #121217 !important; border-right: 1px solid #27272a; }
+        .drawer-bg { background-color: #121217 !important; border-left: 1px solid #27272a; }
     """)
     ui.colors(primary='#dc2626', secondary='#121217', accent='#ef4444')
 
@@ -252,7 +252,7 @@ def main_page():
         start_btn = ui.button("INITIALIZE INTERFACE").classes('start-btn mt-4 px-8 py-4 text-lg font-bold rounded text-white')
 
     # --- 2. SIDEBAR ---
-    with ui.left_drawer(value=False).classes('drawer-bg p-4') as drawer:
+    with ui.right_drawer(value=False).classes('drawer-bg p-4') as drawer:
         ui.html(get_logo(width=200, height=60)).classes('mb-4')
         
         with ui.dialog() as info_dialog, ui.card().classes('bg-[#1a1a23] border border-[#dc2626] text-white'):
@@ -337,9 +337,9 @@ def main_page():
     with ui.column().classes('w-full h-screen relative') as main_chat_view:
         main_chat_view.set_visibility(False)
         
-        with ui.row().classes('w-full p-4 border-b border-[#27272a] bg-[#121217] items-center z-10'):
+        with ui.row().classes('w-full p-4 border-b border-[#27272a] bg-[#121217] items-center justify-between z-10'):
+            ui.label('DACodeX - Coding Assistant').classes('text-xl font-bold ml-2 text-white')
             ui.button(icon='menu', on_click=drawer.toggle).props('flat round dense color=white')
-            ui.label('DACodeX - Academic Core').classes('text-xl font-bold ml-2 text-white')
 
         with ui.scroll_area().classes('flex-grow w-full p-4 pb-40') as scroll_area:
             @ui.refreshable
