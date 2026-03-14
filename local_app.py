@@ -8,6 +8,13 @@ import asyncio
 import io
 import base64
 import concurrent.futures
+import multiprocessing  # Added for Windows packaging support
+import sys              # Added for Windows encoding fix
+
+# --- FIX FOR WINDOWS ENCODING ERRORS ---
+# Prevents crash when the console tries to print emojis
+if sys.platform == 'win32':
+    sys.stdout.reconfigure(encoding='utf-8')
 
 # --- 1. SETUP & MODEL LOADING ---
 hf_token = os.environ.get('HF_TOKEN')
@@ -48,7 +55,6 @@ You are text-based. You cannot see images. Treat errors as puzzles."""
 
 CODE_AWARENESS = """CONSTRAINTS: Avoid professional jargon. Explain errors in plain English."""
 
-# Small models need extremely direct, numbered, capitalized rules.
 PEDAGOGY_SOCRATIC = """*** STRICT SOCRATIC MODE RULES ***
 1. NO CODE: You must NEVER write, fix, or provide direct code solutions.
 2. BE BRIEF: Your entire response MUST be under 3 sentences. Do NOT be long-winded.
@@ -65,8 +71,6 @@ def build_system_prompt(mode, language, course):
     lang_label = language if language else "General Programming"
     course_label = course if course else "General Computer Science"
     
-    # We build the prompt so the MODE rules are at the VERY BOTTOM. 
-    # Small models pay the most attention to the end of the system prompt.
     prompt_parts = [
         BASE_PERSONA.format(course=course_label, language=lang_label),
         CODE_AWARENESS
@@ -318,7 +322,6 @@ def main_page():
                 current_instruction = build_system_prompt(mode_select.value, language_select.value, course_select.value)
                 llama_messages = [{"role": "system", "content": current_instruction}]
                 
-                # Limit history to last 6 messages to keep the context window focused on the instructions
                 for msg in chat_history[-6:]:
                     role = "assistant" if msg['role'] == "model" else msg['role']
                     llama_messages.append({"role": role, "content": msg['raw_text']})
@@ -328,12 +331,9 @@ def main_page():
                     render_messages.refresh()
                     scroll_area.scroll_to(percent=1)
                     
-                    # --- PHYSICAL TOKENS & CREATIVITY CAPS ---
-                    # In Socratic mode, we physically cut the model off at 150 tokens (~3-4 sentences)
-                    # so it literally cannot write long-winded replies or huge blocks of code.
                     is_socratic = mode_select.value == "Socratic"
                     max_toks = 150 if is_socratic else 800
-                    temp = 0.3 if is_socratic else 0.4 # Even lower temperature makes it strict
+                    temp = 0.3 if is_socratic else 0.4 
                     
                     def generate():
                         return llm.create_chat_completion(
@@ -381,6 +381,9 @@ def main_page():
     start_btn.on_click(start_interface)
 
 if __name__ in {"__main__", "__mp_main__"}:
+    # MANDATORY FOR WINDOWS EXE
+    multiprocessing.freeze_support()
+    
     ui.run(
         title="DACodeX - Academic Core", 
         dark=True,
